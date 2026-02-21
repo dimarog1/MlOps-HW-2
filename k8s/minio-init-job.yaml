@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  namespace: mlops
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: minio-init
+        image: minio/mc:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for MinIO to be ready..."
+          until mc alias set myminio http://minio:9000 minioadmin minioadmin; do
+            echo "Waiting for MinIO..."
+            sleep 2
+          done
+          echo "MinIO is ready!"
+          echo "Creating bucket mlops..."
+          mc mb myminio/mlops --ignore-existing || true
+          echo "Setting bucket policy..."
+          mc policy set public myminio/mlops || true
+          echo "Bucket initialization complete!"
+        env:
+        - name: MINIO_ROOT_USER
+          value: "minioadmin"
+        - name: MINIO_ROOT_PASSWORD
+          value: "minioadmin"
+

@@ -1,0 +1,258 @@
+services:
+  # MinIO S3 хранилище
+  minio:
+    image: minio/minio:latest
+    container_name: mlops-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    env_file:
+      - .env
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - mlops-network
+
+  # Создание bucket в MinIO
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb myminio/mlops --ignore-existing;
+      /usr/bin/mc policy set public myminio/mlops;
+      exit 0;
+      "
+    networks:
+      - mlops-network
+
+  # REST API сервис
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mlops-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models
+      - ./datasets:/app/datasets
+      - ./logs:/app/logs
+      - ./.dvc:/app/.dvc
+    depends_on:
+      - minio
+      - minio-init
+    networks:
+      - mlops-network
+    restart: unless-stopped
+
+  # gRPC сервис
+  grpc:
+    build:
+      context: .
+      dockerfile: Dockerfile.grpc
+    container_name: mlops-grpc
+    ports:
+      - "50051:50051"
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models
+      - ./datasets:/app/datasets
+      - ./logs:/app/logs
+      - ./.dvc:/app/.dvc
+    depends_on:
+      - minio
+    networks:
+      - mlops-network
+    restart: unless-stopped
+
+  # Streamlit Dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: mlops-dashboard
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    depends_on:
+      - api
+    networks:
+      - mlops-network
+    restart: unless-stopped
+
+  # ClearML Server Dependencies
+  clearml-mongo:
+    image: mongo:7.0.22
+    container_name: clearml-mongo
+    volumes:
+      - clearml_mongo_db:/data/db
+      - clearml_mongo_config:/data/configdb
+    command: --setParameter internalQueryMaxBlockingSortMemoryUsageBytes=196100200
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      mlops-network:
+        aliases:
+          - mongo
+    restart: unless-stopped
+
+  clearml-redis:
+    image: redis:7-alpine
+    container_name: clearml-redis
+    volumes:
+      - clearml_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      mlops-network:
+        aliases:
+          - redis
+    restart: unless-stopped
+
+  clearml-elasticsearch:
+    image: elasticsearch:8.17.0
+    container_name: clearml-elasticsearch
+    environment:
+      - discovery.type=${ES_DISCOVERY_TYPE}
+      - xpack.security.enabled=${ES_XPACK_SECURITY_ENABLED}
+      - bootstrap.memory_lock=${ES_BOOTSTRAP_MEMORY_LOCK}
+    env_file:
+      - .env
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - clearml_elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      mlops-network:
+        aliases:
+          - elasticsearch
+    restart: unless-stopped
+
+  # ClearML Server (опционально)
+  clearml-apiserver:
+    image: allegroai/clearml:latest
+    container_name: clearml-apiserver
+    command: apiserver
+    ports:
+      - "8008:8008"
+    env_file:
+      - .env
+    volumes:
+      - clearml_data:/opt/clearml/data
+      - clearml_logs:/var/log/clearml
+      - clearml_files:/mnt/fileserver
+    depends_on:
+      clearml-mongo:
+        condition: service_healthy
+      clearml-redis:
+        condition: service_healthy
+      clearml-elasticsearch:
+        condition: service_healthy
+    networks:
+      mlops-network:
+        aliases:
+          - apiserver
+    restart: unless-stopped
+
+  clearml-webserver:
+    image: allegroai/clearml:latest
+    container_name: clearml-webserver
+    command: webserver
+    ports:
+      - "8080:80"
+    depends_on:
+      clearml-apiserver:
+        condition: service_started
+      clearml-fileserver:
+        condition: service_started
+    environment:
+      - CLEARML_API_HOST=http://clearml-apiserver:8008
+      - CLEARML_FILES_HOST=http://fileserver:8081
+    env_file:
+      - .env
+    networks:
+      - mlops-network
+    restart: unless-stopped
+
+  clearml-fileserver:
+    image: allegroai/clearml:latest
+    container_name: clearml-fileserver
+    command: fileserver
+    ports:
+      - "8081:8081"
+    env_file:
+      - .env
+    volumes:
+      - clearml_files:/mnt/fileserver
+      - clearml_logs:/var/log/clearml
+      - clearml_data:/opt/clearml/data
+    depends_on:
+      clearml-mongo:
+        condition: service_healthy
+      clearml-redis:
+        condition: service_healthy
+      clearml-elasticsearch:
+        condition: service_healthy
+      clearml-apiserver:
+        condition: service_started
+    networks:
+      mlops-network:
+        aliases:
+          - fileserver
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+    driver: local
+  clearml_data:
+    driver: local
+  clearml_logs:
+    driver: local
+  clearml_files:
+    driver: local
+  clearml_mongo_db:
+    driver: local
+  clearml_mongo_config:
+    driver: local
+  clearml_redis:
+    driver: local
+  clearml_elasticsearch:
+    driver: local
+
+networks:
+  mlops-network:
+    driver: bridge
+

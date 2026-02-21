@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clearml-config
+  namespace: mlops
+data:
+  clearml.conf: |
+    # ClearML SDK configuration file
+    api {
+        # API server on port 8008
+        api_server: http://host.minikube.internal:8008
+        
+        # web_server on port 8080
+        web_server: http://host.minikube.internal:8080
+        
+        # file server on port 8081
+        files_server: http://host.minikube.internal:8081
+        
+        # Credentials (will be set from secret)
+        credentials {
+            "access_key" = ${CLEARML_ACCESS_KEY}
+            "secret_key" = ${CLEARML_SECRET_KEY}
+        }
+    }
+    
+    sdk {
+        storage {
+            default_output_uri: "s3://mlops/clearml"
+            cache {
+                default_base_dir: "/tmp/clearml_cache"
+            }
+        }
+        aws {
+            s3 {
+                key: "minioadmin"
+                secret: "minioadmin"
+                host: "http://minio:9000"
+                multipart: true
+                secure: false
+            }
+        }
+    }
+

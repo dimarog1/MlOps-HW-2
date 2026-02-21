@@ -1,0 +1,26 @@
+# Dockerfile для Streamlit дашборда
+
+FROM python:3.10-slim
+
+# Системные зависимости не требуются для Streamlit
+# (все зависимости Python устанавливаются через Poetry)
+
+# Устанавливаем Poetry
+RUN pip install poetry==1.7.1
+
+WORKDIR /app
+
+# Копируем и устанавливаем зависимости (кэшируется отдельно)
+COPY pyproject.toml ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-interaction --no-ansi --no-root --only main \
+    && poetry cache clear pypi --all -n || true
+
+# Копируем дашборд
+COPY dashboard/ ./dashboard/
+
+EXPOSE 8501
+
+# Запуск Streamlit
+CMD ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+

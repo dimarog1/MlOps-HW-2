@@ -1,0 +1,8 @@
+[core]
+    remote = s3storage
+    autostage = true
+['remote "s3storage"']
+    url = s3://mlops/dvc
+    endpointurl = http://minio:9000
+    access_key_id = minioadmin
+    secret_access_key = minioadmin

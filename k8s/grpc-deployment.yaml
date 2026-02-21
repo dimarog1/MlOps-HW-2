@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlops-grpc
+  namespace: mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlops-grpc
+  template:
+    metadata:
+      labels:
+        app: mlops-grpc
+    spec:
+      containers:
+      - name: grpc
+        image: mlops-grpc:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 50051
+          name: grpc
+        envFrom:
+        - configMapRef:
+            name: mlops-config
+        volumeMounts:
+        - name: models-storage
+          mountPath: /app/models
+        - name: datasets-storage
+          mountPath: /app/datasets
+        livenessProbe:
+          tcpSocket:
+            port: 50051
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 50051
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: models-storage
+        persistentVolumeClaim:
+          claimName: mlops-models-pvc
+      - name: datasets-storage
+        persistentVolumeClaim:
+          claimName: mlops-datasets-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlops-grpc
+  namespace: mlops
+spec:
+  type: NodePort
+  ports:
+  - port: 50051
+    targetPort: 50051
+    nodePort: 30051
+    name: grpc
+  selector:
+    app: mlops-grpc
+

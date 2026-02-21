@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package mlservice;
+
+// Сервис для работы с ML моделями
+service MLService {
+  // Проверка здоровья сервиса
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+  
+  // Получение списка доступных типов моделей
+  rpc GetModelTypes(ModelTypesRequest) returns (ModelTypesResponse);
+  
+  // Обучение модели
+  rpc TrainModel(TrainModelRequest) returns (TrainModelResponse);
+  
+  // Переобучение существующей модели
+  rpc RetrainModel(RetrainModelRequest) returns (TrainModelResponse);
+  
+  // Предсказание
+  rpc Predict(PredictRequest) returns (PredictResponse);
+  
+  // Список моделей
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  
+  // Удаление модели
+  rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
+  
+  // Список датасетов
+  rpc ListDatasets(ListDatasetsRequest) returns (ListDatasetsResponse);
+}
+
+// Health check
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+}
+
+// Model types
+message ModelTypesRequest {}
+
+message ModelType {
+  string name = 1;
+  string description = 2;
+  string hyperparameters_json = 3;
+}
+
+message ModelTypesResponse {
+  repeated ModelType model_types = 1;
+}
+
+// Train model
+message TrainModelRequest {
+  string model_type = 1;
+  string model_name = 2;
+  string dataset_name = 3;
+  string hyperparameters_json = 4;
+  string target_column = 5;
+}
+
+message TrainModelResponse {
+  string model_name = 1;
+  string model_type = 2;
+  string metrics_json = 3;
+  string clearml_task_id = 4;
+}
+
+// Retrain model
+message RetrainModelRequest {
+  string model_name = 1;
+  string dataset_name = 2;
+  string target_column = 3;
+  string hyperparameters_json = 4;
+}
+
+// Predict
+message PredictRequest {
+  string model_name = 1;
+  string data_json = 2;
+}
+
+message PredictResponse {
+  string predictions_json = 1;
+  string model_name = 2;
+}
+
+// List models
+message ListModelsRequest {}
+
+message ModelInfo {
+  string name = 1;
+  string type = 2;
+  string created_at = 3;
+  string metrics_json = 4;
+}
+
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
+}
+
+// Delete model
+message DeleteModelRequest {
+  string model_name = 1;
+}
+
+message DeleteModelResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// List datasets
+message ListDatasetsRequest {}
+
+message DatasetInfo {
+  string name = 1;
+  int64 size = 2;
+  int32 rows = 3;
+  string columns_json = 4;
+  string uploaded_at = 5;
+}
+
+message ListDatasetsResponse {
+  repeated DatasetInfo datasets = 1;
+}
+

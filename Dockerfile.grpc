@@ -1,0 +1,48 @@
+# Dockerfile для gRPC сервиса
+
+FROM python:3.10-slim
+
+# Системные зависимости (gcc/g++ нужны для компиляции grpcio)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем Poetry
+RUN pip install poetry==1.7.1
+
+WORKDIR /app
+
+# Копируем и устанавливаем зависимости (кэшируется отдельно)
+COPY pyproject.toml ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-interaction --no-ansi --no-root --only main \
+    && poetry cache clear pypi --all -n || true
+
+# Копируем код
+COPY app/ ./app/
+COPY scripts/ ./scripts/
+COPY clearml.conf ./
+
+# Создаем директории
+RUN mkdir -p /app/models /app/datasets /app/logs
+
+# Генерируем gRPC файлы
+RUN python -m grpc_tools.protoc \
+    -I./app/grpc_service \
+    --python_out=./app/grpc_service \
+    --grpc_python_out=./app/grpc_service \
+    ./app/grpc_service/ml_service.proto
+
+# Исправляем импорты в сгенерированных файлах для корректной работы
+RUN sed -i 's/^import ml_service_pb2/from . import ml_service_pb2/' /app/app/grpc_service/ml_service_pb2_grpc.py
+
+# Проверяем что файлы созданы и импортируются
+RUN ls -la /app/app/grpc_service/*.py && \
+    python -c "from app.grpc_service import ml_service_pb2, ml_service_pb2_grpc; print('✓ Protobuf imports OK')"
+
+EXPOSE 50051
+
+# Запуск gRPC сервера
+CMD ["python", "-m", "app.grpc_service.server"]
+
